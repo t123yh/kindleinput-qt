@@ -6,6 +6,8 @@
 #include <qpa/qplatforminputcontextplugin_p.h>
 #include <QtCore/QStringList>
 
+QT_BEGIN_NAMESPACE
+
 class QKindlePlatformInputContextPlugin : public QPlatformInputContextPlugin
 {
     Q_OBJECT
@@ -15,5 +17,7 @@ public:
     QKindlePlatformInputContextPlugin(QObject *parent = 0);
     QKindlePlatformInputContext *create(const QString&, const QStringList&) Q_DECL_OVERRIDE;
 };
+
+QT_END_NAMESPACE
 
 #endif // QKINDLEPLATFORMINPUTCONTEXTPLUGIN_H

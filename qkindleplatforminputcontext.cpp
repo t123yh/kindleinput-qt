@@ -6,6 +6,8 @@
 #include <QInputMethodQueryEvent>
 #include <QDebug>
 #include <QGuiApplication>
+#include <QInputMethodEvent>
+#include <QThread>
 
 const QString QKindlePlatformInputContext::keyboardLipcName = QString("com.lab126.keyboard");
 
@@ -80,25 +82,26 @@ QKindlePlatformInputContext::~QKindlePlatformInputContext()
 
 void QKindlePlatformInputContext::handleKeyboardGetSurround()
 {
-    if (this->m_focusObject) {
-        QInputMethodQueryEvent query(Qt::ImCursorPosition | Qt::ImSurroundingText);
-        QGuiApplication::sendEvent(m_focusObject, &query);
-        QString txt = query.value(Qt::ImSurroundingText).toString();
-        int pos = query.value(Qt::ImCursorPosition).toInt();
-        LipcSetStringProperty(this->lipcInstance, this->keyboardLipcName.toUtf8().constData(), "setSurround", QString("%1:%2").arg(pos).arg(txt).toUtf8().constData());
-    }
+    auto queryResult = focusObjectInputMethodQueryThreadSafe(Qt::ImCursorPosition | Qt::ImSurroundingText);
+    if (queryResult.isNull())
+        return;
+    QString txt = queryResult->value(Qt::ImSurroundingText).toString();
+    int pos = queryResult->value(Qt::ImCursorPosition).toInt();
+    LipcSetStringProperty(this->lipcInstance, this->keyboardLipcName.toUtf8().constData(), "setSurround", QString("%1:%2").arg(pos).arg(txt).toUtf8().constData());
 }
 
 void QKindlePlatformInputContext::handleKeyboradReplace(int beforeCursor, int afterCursor, const QString &content)
 {
-     if (this->m_focusObject)
-     {
-         QInputMethodEvent event;
-         event.setCommitString(content, -beforeCursor, afterCursor + beforeCursor);
-         QGuiApplication::sendEvent(m_focusObject, &event);
-     }
+    auto queryResult = focusObjectInputMethodQueryThreadSafe(Qt::ImCursorPosition | Qt::ImSurroundingText);
+    if (queryResult.isNull())
+        return;
+    int pos = queryResult->value(Qt::ImCursorPosition).toInt();
+    if (pos < beforeCursor)
+        beforeCursor = pos;
+    QInputMethodEvent *event = new QInputMethodEvent;
+    event->setCommitString(content, -beforeCursor, afterCursor + beforeCursor);
+    sendInputMethodEventThreadSafe(event);
 }
-
 
 bool QKindlePlatformInputContext::isValid() const
 {
@@ -124,6 +127,7 @@ void QKindlePlatformInputContext::showInputPanel()
 
 void QKindlePlatformInputContext::hideInputPanel()
 {
+    qDebug() << "Calling hideInputPanel";
     LipcSetStringProperty(this->lipcInstance,
                           QKindlePlatformInputContext::keyboardLipcName.toUtf8().constData(),
                           "close",
@@ -132,6 +136,7 @@ void QKindlePlatformInputContext::hideInputPanel()
 
 bool QKindlePlatformInputContext::isInputPanelVisible() const
 {
+    qDebug() << "Checking isInputPanelVisible";
     int value;
     if (LipcGetIntProperty(
                 this->lipcInstance,
@@ -141,4 +146,57 @@ bool QKindlePlatformInputContext::isInputPanelVisible() const
         return value == 1;
     }
     return false;
+}
+
+
+QSharedPointer<QInputMethodQueryEvent> QKindlePlatformInputContext::focusObjectInputMethodQueryThreadSafe(Qt::InputMethodQueries queries) {
+    QSharedPointer<QInputMethodQueryEvent> retval;
+    if (!qGuiApp)
+        return QSharedPointer<QInputMethodQueryEvent>();
+    const bool inMainThread = qGuiApp->thread() == QThread::currentThread();
+
+    QInputMethodQueryEvent *queryEvent = 0;
+    QMetaObject::invokeMethod(this, "focusObjectInputMethodQueryUnsafe",
+                              inMainThread ? Qt::DirectConnection : Qt::BlockingQueuedConnection,
+                              Q_RETURN_ARG(QInputMethodQueryEvent*, queryEvent),
+                              Q_ARG(Qt::InputMethodQueries, queries));
+
+    return QSharedPointer<QInputMethodQueryEvent>(queryEvent);
+}
+
+QInputMethodQueryEvent *QKindlePlatformInputContext::focusObjectInputMethodQueryUnsafe(Qt::InputMethodQueries queries)
+{
+    QObject *focusObject = qGuiApp->focusObject();
+    if (!focusObject)
+        return 0;
+
+    QInputMethodQueryEvent *ret = new QInputMethodQueryEvent(queries);
+    QCoreApplication::sendEvent(focusObject, ret);
+    return ret;
+}
+
+
+void QKindlePlatformInputContext::sendInputMethodEventUnsafe(QInputMethodEvent *event)
+{
+    qDebug() << "Beginning to send unsafe event";
+    QObject *focusObject = qGuiApp->focusObject();
+    if (!focusObject)
+        return;
+
+    qDebug() << "Sending unsafe event, focus = " << focusObject << ", event = " << event;
+
+    QCoreApplication::sendEvent(focusObject, event);
+
+    qDebug() << "Sent event";
+}
+
+void QKindlePlatformInputContext::sendInputMethodEventThreadSafe(QInputMethodEvent *event)
+{
+    if (!qGuiApp)
+        return;
+    const bool inMainThread = qGuiApp->thread() == QThread::currentThread();
+    QMetaObject::invokeMethod(this, "sendInputMethodEventUnsafe",
+                              inMainThread ? Qt::DirectConnection : Qt::BlockingQueuedConnection,
+                              Q_ARG(QInputMethodEvent*, event));
+    qDebug() << "returning";
 }

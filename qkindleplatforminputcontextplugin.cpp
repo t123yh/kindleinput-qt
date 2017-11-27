@@ -15,6 +15,7 @@ QKindlePlatformInputContext *QKindlePlatformInputContextPlugin::create(const QSt
     Q_UNUSED(paramList);
 
     if (key == QLatin1String("kindle")) {
+        qDebug() << "Creating context";
         return new QKindlePlatformInputContext;
     }
 
